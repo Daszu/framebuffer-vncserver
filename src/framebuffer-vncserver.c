@@ -482,11 +482,10 @@ static void update_screen(void)
             }
         }
     }
-    else if (bits_per_pixel == 16)
-    {
-        uint16_t *f = (uint16_t *)fbmmap; /* -> framebuffer         */
-        uint16_t *c = (uint16_t *)fbbuf;  /* -> compare framebuffer */
-        uint16_t *r = (uint16_t *)vncbuf; /* -> remote framebuffer  */
+    else if (vnc_rotate != 0 && (bits_per_pixel == 8 || bits_per_pixel == 16 || bits_per_pixel == 32)) {
+        uint32_t *f = (uint32_t *)fbmmap; /* -> framebuffer         */
+        uint32_t *c = (uint32_t *)fbbuf;  /* -> compare framebuffer */
+        uint32_t *r = (uint32_t *)vncbuf; /* -> remote framebuffer  */
 
         switch (vnc_rotate)
         {
@@ -507,20 +506,23 @@ static void update_screen(void)
 
         if (memcmp(fbmmap, fbbuf, frame_size) != 0)
         {
+            int xstep = 4 / bytespp;
+
             int y;
             for (y = 0; y < (int)fb_yres; y++)
             {
-                /* Compare every pixels at a time */
+                /* Compare every 1/2/4 pixels at a time */
                 int x;
-                for (x = 0; x < (int)fb_xres; x++)
+                for (x = 0; x < (int)fb_xres; x += xstep)
                 {
-                    uint16_t pixel = *f;
+                    uint32_t pixel = *f;
 
                     if (pixel != *c)
                     {
                         int x2, y2;
 
                         *c = pixel;
+
                         switch (vnc_rotate)
                         {
                         case 0:
@@ -547,7 +549,28 @@ static void update_screen(void)
                             exit(EXIT_FAILURE);
                         }
 
-                        r[y2 * server->width + x2] = PIXEL_FB_TO_RFB(pixel, varblock.r_offset, varblock.g_offset, varblock.b_offset);
+                        if (bytespp == 4)
+                        {
+                            r[y2 * server->width + x2] = PIXEL_FB_TO_RFB(pixel,
+                                                 varblock.r_offset, varblock.g_offset, varblock.b_offset);
+                        }
+                        else if (bytespp == 2)
+                        {
+                            r[y2 * server->width + x2] = PIXEL_FB_TO_RFB(pixel,
+                                                 varblock.r_offset, varblock.g_offset, varblock.b_offset);
+
+                            uint32_t high_pixel = (0xffff0000 & pixel) >> 16;
+                            uint32_t high_r = PIXEL_FB_TO_RFB(high_pixel, varblock.r_offset, varblock.g_offset, varblock.b_offset);
+                            r[y2 * server->width + x2] |= (0xffff & high_r) << 16;
+                        }
+                        else if (bytespp == 1)
+                        {
+                            r[y2 * server->width + x2] = pixel;
+                        }
+                        else
+                        {
+                            // TODO
+                        }
 
                         if (x2 < varblock.min_i)
                             varblock.min_i = x2;
